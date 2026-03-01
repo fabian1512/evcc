@@ -1,0 +1,277 @@
+template: fox-ess-h3-smart-test
+products:
+  - brand: FoxESS
+    description:
+      generic: H3-Pro/Smart Series Hybrid Inverter-test
+capabilities: ["battery-control"]
+params:
+  - name: usage
+    choice: ["grid", "pv", "battery"]
+  - name: modbus
+    choice: ["rs485", "tcpip"]
+    id: 247
+  - name: maxacpower
+  - preset: battery-params
+render: |
+  type: custom
+  {{- if eq .usage "grid" }}
+  power:
+    source: calc
+    add:
+    - source: modbus
+      {{- include "modbus" . | indent 4 }}
+      register:
+        address: 38816 # Meter Power R
+        type: holding
+        decode: int32
+      scale: -0.1
+    - source: modbus
+      {{- include "modbus" . | indent 4 }}
+      register:
+        address: 38818 # Meter Power S
+        type: holding
+        decode: int32
+      scale: -0.1
+    - source: modbus
+      {{- include "modbus" . | indent 4 }}
+      register:
+        address: 38820 # Meter Power T
+        type: holding
+        decode: int32
+      scale: -0.1
+  energy:
+    source: modbus
+    {{- include "modbus" . | indent 2 }}
+    register:
+      address: 39617 # Grid Consumption Total
+      type: holding
+      decode: uint32
+    scale: 0.01
+  {{- end }}
+  {{- if eq .usage "pv" }}
+  power:
+    source: calc
+    add:
+    - source: modbus
+      {{- include "modbus" . | indent 4 }}
+      register:
+        address: 39279 # PV1
+        type: holding
+        decode: int32
+    - source: modbus
+      {{- include "modbus" . | indent 4 }}
+      register:
+        address: 39281 # PV2
+        type: holding
+        decode: int32
+    - source: modbus
+      {{- include "modbus" . | indent 4 }}
+      register:
+        address: 39283 # PV3
+        type: holding
+        decode: int32
+    - source: modbus
+      {{- include "modbus" . | indent 4 }}
+      register:
+        address: 39285 # PV4
+        type: holding
+        decode: int32
+    - source: modbus
+      {{- include "modbus" . | indent 4 }}
+      register:
+        address: 39287 # PV5
+        type: holding
+        decode: int32
+    - source: modbus
+      {{- include "modbus" . | indent 4 }}
+      register:
+        address: 39289 # PV6
+        type: holding
+        decode: int32
+  maxacpower: {{ .maxacpower }}
+  {{- end }}
+  {{- if eq .usage "battery" }}
+  power:
+    source: modbus
+    {{- include "modbus" . | indent 2 }}
+    register:
+      address: 39237 # Battery Charge/Discharge
+      type: holding
+      decode: int32
+  soc:
+    source: modbus
+    {{- include "modbus" . | indent 2 }}
+    register:
+      address: 37612 # BatSoC
+      type: holding
+      decode: int16
+  batterymode:
+    source: switch
+    switch:
+    - case: 1 # normal — Self Use, restore default SoC limits
+      set:
+        source: sequence
+        set:
+        - source: const
+          value: 0
+          set:
+            source: modbus
+            {{- include "modbus" . | indent 10 }}
+            register:
+              address: 48240 # Group 24 Disable (evcc)
+              type: writesingle
+              decode: uint16
+        - source: const
+          value: {{ .maxsoc }}
+          set:
+            source: modbus
+            {{- include "modbus" . | indent 10 }}
+            register:
+              address: 46620 # MaxSoC FromGrid
+              type: writesingle
+              decode: uint16
+        - source: const
+          value: 500
+          set:
+            source: modbus
+            {{- include "modbus" . | indent 10 }}
+            register:
+              address: 46608 # Battery max discharge current = 50A (restore)
+              type: writesingle
+              decode: uint16
+    - case: 2 # hold — Battery Lock (prevent discharge)
+      set:
+        source: sequence
+        set:
+        - source: const
+          value: 0
+          set:
+            source: modbus
+            {{- include "modbus" . | indent 10 }}
+            register:
+              address: 48240 # Group 24 Disable (evcc)
+              type: writesingle
+              decode: uint16
+        - source: const
+          value: 100
+          set:
+            source: modbus
+            {{- include "modbus" . | indent 10 }}
+            register:
+              address: 46620 # MaxSoC FromGrid = 100%
+              type: writesingle
+              decode: uint16
+        - source: const
+          value: 0
+          set:
+            source: modbus
+            {{- include "modbus" . | indent 10 }}
+            register:
+              address: 46608 # Battery max discharge current = 0A (lock)
+              type: writesingle
+              decode: uint16
+    - case: 3 # charge — Force Charge via Time Period Group 24
+      set:
+        source: sequence
+        set:
+        - source: const
+          value: 1
+          set:
+            source: modbus
+            {{- include "modbus" . | indent 10 }}
+            register:
+              address: 48000 # Time Period Enable
+              type: writesingle
+              decode: uint16
+        - source: const
+          value: 1
+          set:
+            source: modbus
+            {{- include "modbus" . | indent 10 }}
+            register:
+              address: 48240 # Group 24 Enable (evcc)
+              type: writesingle
+              decode: uint16
+        - source: const
+          value: 0
+          set:
+            source: modbus
+            {{- include "modbus" . | indent 10 }}
+            register:
+              address: 48241 # Start Time 00:00
+              type: writesingle
+              decode: uint16
+        - source: const
+          value: 5947
+          set:
+            source: modbus
+            {{- include "modbus" . | indent 10 }}
+            register:
+              address: 48242 # End Time 23:59 (0x173B)
+              type: writesingle
+              decode: uint16
+        - source: const
+          value: 6
+          set:
+            source: modbus
+            {{- include "modbus" . | indent 10 }}
+            register:
+              address: 48243 # Work Mode = Force Charge
+              type: writesingle
+              decode: uint16
+        - source: const
+          value: {{ add (mul .maxsoc 256) .minsoc }}
+          set:
+            source: modbus
+            {{- include "modbus" . | indent 10 }}
+            register:
+              address: 48244 # (maxsoc<<8)|minsoc
+              type: writesingle
+              decode: uint16
+        - source: const
+          value: {{ .maxsoc }}
+          set:
+            source: modbus
+            {{- include "modbus" . | indent 10 }}
+            register:
+              address: 48245 # FDSOC = maxsoc
+              type: writesingle
+              decode: uint16
+        - source: const
+          value: {{ .maxchargepower }}
+          set:
+            source: modbus
+            {{- include "modbus" . | indent 10 }}
+            register:
+              address: 48246 # FDPWR — charge power in watts
+              type: writesingle
+              decode: uint16
+        - source: const
+          value: 0
+          set:
+            source: modbus
+            {{- include "modbus" . | indent 10 }}
+            register:
+              address: 48247 # Reserve
+              type: writesingle
+              decode: uint16
+        - source: const
+          value: 0
+          set:
+            source: modbus
+            {{- include "modbus" . | indent 10 }}
+            register:
+              address: 48248 # Reserve
+              type: writesingle
+              decode: uint16
+        - source: const
+          value: 1
+          set:
+            source: modbus
+            {{- include "modbus" . | indent 10 }}
+            register:
+              address: 48249 # Enable Flag (undocumented, required!)
+              type: writesingle
+              decode: uint16
+  {{- include "battery-params" . }}
+  {{- end }}
