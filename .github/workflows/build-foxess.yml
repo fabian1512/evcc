@@ -1,0 +1,64 @@
+name: FoxESS H3 Smart Build
+
+on:
+  push:
+    tags:
+      - "fox-ess-h3-smart-v*"
+
+jobs:
+  build:
+    name: Build & Release
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          cache: "npm"
+
+      - name: Install UI dependencies
+        run: make install-ui
+
+      - name: Build UI
+        run: make ui
+
+      - name: Install Go tools
+        run: make install
+
+      - name: Build binary (linux/amd64)
+        run: make build
+        env:
+          RELEASE: 1
+          TAG_NAME: "0.304.5"
+          GOOS: linux
+          GOARCH: amd64
+
+      - name: Package
+        run: |
+          tar -czf evcc-linux-amd64.tar.gz evcc
+          zip evcc-linux-amd64.zip evcc-linux-amd64.tar.gz
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: evcc-linux-amd64.zip
+          tag_name: ${{ github.ref_name }}
+          name: "FoxESS H3 Smart - Battery Control Fix ${{ github.ref_name }}"
+          body: |
+            Battery control fix for FoxESS H3-Pro/Smart Series Hybrid Inverter.
+            - Force Charge via Time Period Group 24
+            - Battery Lock via Register 46608 (FC 06, writesingle)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
