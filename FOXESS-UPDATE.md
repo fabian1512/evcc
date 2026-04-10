@@ -93,3 +93,43 @@ Key register findings:
 - **46620** — MaxSoC FromGrid (new in Modbus Protocol V1.05.04.00)
 - **48249** — Enable Flag (undocumented, must be set to 1 for Force Charge to work)
 - **48000** — Time Period Enable: kept at 1 permanently to preserve user schedules
+
+---
+
+# evcc — Ladehistorie wiederherstellen nach Ladepunkt-Neuanlage
+
+Wenn ein Ladepunkt gelöscht und neu angelegt wird, sind die alten Sessions in der UI nicht mehr sichtbar. Die Daten sind jedoch noch in der SQLite-Datenbank vorhanden und können per SQL-Update wiederhergestellt werden.
+
+## Vorgehen
+
+```bash
+# In LXC einloggen
+ssh -i ~/.ssh/id_rsa_nopass root@192.168.1.12
+pct enter 108
+
+# 1. Backup erstellen
+cp /var/lib/evcc/evcc.db /var/lib/evcc/evcc.db.backup-$(date +%Y%m%d)
+
+# 2. Alten Ladepunkt-Namen in den Sessions prüfen
+sqlite3 /var/lib/evcc/evcc.db "SELECT DISTINCT loadpoint FROM sessions;"
+
+# 3. Neuen Ladepunkt-Namen prüfen (aus configs-Tabelle, class=5)
+sqlite3 /var/lib/evcc/evcc.db "SELECT id, title, value FROM configs WHERE class=5;"
+
+# 4. Sessions umbenennen
+sqlite3 /var/lib/evcc/evcc.db "UPDATE sessions SET loadpoint = 'NEUER_NAME' WHERE loadpoint = 'ALTER_NAME';"
+
+# 5. Ergebnis prüfen
+sqlite3 /var/lib/evcc/evcc.db "SELECT loadpoint, COUNT(*) FROM sessions GROUP BY loadpoint;"
+```
+
+Kein Neustart von evcc nötig — die UI zeigt die Sessions sofort.
+
+## Beispiel (April 2026)
+
+Ladepunkt wurde von `Carport` in `Wall-E` umbenannt (Neuanlage):
+
+```sql
+UPDATE sessions SET loadpoint = 'Wall-E' WHERE loadpoint = 'Carport';
+-- 154 Sessions wiederhergestellt
+```
