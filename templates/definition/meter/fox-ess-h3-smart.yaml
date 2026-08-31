@@ -125,145 +125,233 @@ render: |
       address: 37612 # Soc
       type: holding
       decode: int16
-  limitsoc:
-    source: convert
-    convert: float2int
-    set:
-      source: modbus
-      {{- include "modbus" . | indent 4 }}
-      register:
-        address: 46611 # Minimum SoC OnGrid
-        type: writesingle
-        decode: uint16
   batterymode:
-    source: watchdog
-    timeout: 30s
-    reset: 1 # reset to normal mode
-    set:
-      source: switch
-      switch:
-      - case: 1 # normal - disable remote control
+    source: switch
+    switch:
+    - case: 1 # normal - Self Use, restore SoC limits and discharge
+      set:
+        source: sequence
         set:
-          source: sequence
+        # Set global Work Mode = Self Use (max 1/2 per protocol)
+        - source: const
+          value: 1
           set:
-          - source: const
-            value: 0 # Disabled
-            set:
-              source: modbus
-              {{- include "modbus" . | indent 12 }}
-              register:
-                address: 46001 # Remote Control
-                type: writesingle
-                encoding: uint16
-          - source: const
-            value: 1 # Self Use
-            set:
-              source: modbus
-              {{- include "modbus" . | indent 12 }}
-              register:
-                address: 49203 # Work Mode
-                type: writesingle
-                encoding: uint16
-          - source: const
-            value: {{ .minsoc }}
-            set:
-              source: modbus
-              {{- include "modbus" . | indent 12 }}
-              register:
-                address: 46609 # Minimum SoC
-                type: writesingle
-                encoding: uint16
-          - source: const
-            value: {{ .maxsoc }}
-            set:
-              source: modbus
-              {{- include "modbus" . | indent 12 }}
-              register:
-                address: 46610 # Maximum SoC
-                type: writesingle
-                encoding: uint16
-      - case: 2 # hold - stop battery discharge
+            source: modbus
+            {{- include "modbus" . | indent 10 }}
+            register:
+              address: 49203 # Work Mode
+              type: writesingle
+              encoding: uint16
+        # Disable Group 24 (evcc control channel)
+        - source: const
+          value: 0
+          set:
+            source: modbus
+            {{- include "modbus" . | indent 10 }}
+            register:
+              address: 48240 # Group 24 Enable
+              type: writesingle
+              encoding: uint16
+        # Disable Time Period System (keeps app schedules' registers intact)
+        - source: const
+          value: 0
+          set:
+            source: modbus
+            {{- include "modbus" . | indent 10 }}
+            register:
+              address: 48000 # Time Mode Flag
+              type: writesingle
+              encoding: uint16
+        # Restore MaxSoC FromGrid
+        - source: const
+          value: {{ .maxsoc }}
+          set:
+            source: modbus
+            {{- include "modbus" . | indent 10 }}
+            register:
+              address: 46620 # MaxSoC FromGrid
+              type: writesingle
+              encoding: uint16
+        # Restore battery discharge current (50A)
+        - source: const
+          value: 500
+          set:
+            source: modbus
+            {{- include "modbus" . | indent 10 }}
+            register:
+              address: 46608 # Battery max discharge current
+              type: writesingle
+              encoding: uint16
+    - case: 2 # hold - prevent battery discharge
+      set:
+        source: sequence
         set:
-          source: sequence
+        # Set global Work Mode = Self Use (max 1/2 per protocol)
+        - source: const
+          value: 1
           set:
-          - source: const
-            value: 2 # Feed-in First, fallback if the remote control watchdog expires
-            set:
-              source: modbus
-              {{- include "modbus" . | indent 12 }}
-              register:
-                address: 49203 # Work Mode
-                type: writesingle
-                encoding: uint16
-          - source: const
-            value: 60 # Remote timeout 60 seconds
-            set:
-              source: modbus
-              {{- include "modbus" . | indent 12 }}
-              register:
-                address: 46002 # Remote Timeout Set
-                type: writesingle
-                encoding: uint16
-          - source: const
-            value: 1 # Enabled
-            set:
-              source: modbus
-              {{- include "modbus" . | indent 12 }}
-              register:
-                address: 46001 # Remote Control
-                type: writesingle
-                encoding: uint16
-          - source: const
-            value: 0 # W
-            set:
-              source: modbus
-              {{- include "modbus" . | indent 12 }}
-              register:
-                address: 46003 # Remote Active Power, int32 across 46003 (high word) and 46004 (low word)
-                type: writemultiple
-                encoding: int32
-      - case: 3 # charge - force battery charge
+            source: modbus
+            {{- include "modbus" . | indent 10 }}
+            register:
+              address: 49203 # Work Mode
+              type: writesingle
+              encoding: uint16
+        # Disable Group 24 (evcc control channel)
+        - source: const
+          value: 0
+          set:
+            source: modbus
+            {{- include "modbus" . | indent 10 }}
+            register:
+              address: 48240 # Group 24 Enable
+              type: writesingle
+              encoding: uint16
+        # Disable Time Period System (keeps app schedules' registers intact)
+        - source: const
+          value: 0
+          set:
+            source: modbus
+            {{- include "modbus" . | indent 10 }}
+            register:
+              address: 48000 # Time Mode Flag
+              type: writesingle
+              encoding: uint16
+        # MaxSoC FromGrid = 100% (full grid-charging range)
+        - source: const
+          value: 100
+          set:
+            source: modbus
+            {{- include "modbus" . | indent 10 }}
+            register:
+              address: 46620 # MaxSoC FromGrid
+              type: writesingle
+              encoding: uint16
+        # Lock battery discharge (0A)
+        - source: const
+          value: 0
+          set:
+            source: modbus
+            {{- include "modbus" . | indent 10 }}
+            register:
+              address: 46608 # Battery max discharge current
+              type: writesingle
+              encoding: uint16
+    - case: 3 # charge - force charge from grid via Time Period Group 24
+      set:
+        source: sequence
         set:
-          source: sequence
+        # Time Period System master flag stays 1 (never globally disabled)
+        - source: const
+          value: 1
           set:
-          - source: const
-            value: 3 # Back-up, fallback if the remote control watchdog expires
-            set:
-              source: modbus
-              {{- include "modbus" . | indent 12 }}
-              register:
-                address: 49203 # Work Mode
-                type: writesingle
-                encoding: uint16
-          - source: const
-            value: 60 # Remote timeout 60 seconds
-            set:
-              source: modbus
-              {{- include "modbus" . | indent 12 }}
-              register:
-                address: 46002 # Remote Timeout Set
-                type: writesingle
-                encoding: uint16
-          - source: const
-            value: 1 # Enabled
-            set:
-              source: modbus
-              {{- include "modbus" . | indent 12 }}
-              register:
-                address: 46001 # Remote Control
-                type: writesingle
-                encoding: uint16
-          - source: const
-            value: {{ mul .maxchargepower -1 }} # negative power means charging
-            set:
-              source: modbus
-              {{- include "modbus" . | indent 12 }}
-              register:
-                address: 46003 # Remote Active Power, int32 across 46003 (high word) and 46004 (low word)
-                type: writemultiple
-                encoding: int32
-      default:
-        source: error
-        error: ErrNotAvailable
+            source: modbus
+            {{- include "modbus" . | indent 10 }}
+            register:
+              address: 48000 # Time Mode Flag
+              type: writesingle
+              encoding: uint16
+        # Group 24 Enable
+        - source: const
+          value: 1
+          set:
+            source: modbus
+            {{- include "modbus" . | indent 10 }}
+            register:
+              address: 48240 # Group 24 Enable
+              type: writesingle
+              encoding: uint16
+        # Start Time 00:00
+        - source: const
+          value: 0
+          set:
+            source: modbus
+            {{- include "modbus" . | indent 10 }}
+            register:
+              address: 48241 # Group 24 Start Time
+              type: writesingle
+              encoding: uint16
+        # End Time 23:59 (0x173B = 5947)
+        - source: const
+          value: 5947
+          set:
+            source: modbus
+            {{- include "modbus" . | indent 10 }}
+            register:
+              address: 48242 # Group 24 End Time
+              type: writesingle
+              encoding: uint16
+        # Work Mode = Force Charge
+        - source: const
+          value: 6
+          set:
+            source: modbus
+            {{- include "modbus" . | indent 10 }}
+            register:
+              address: 48243 # Group 24 Work Mode
+              type: writesingle
+              encoding: uint16
+        # MaxSoC/ MinSoC combined register
+        - source: const
+          value: {{ add (mul .maxsoc 256) .minsoc }}
+          set:
+            source: modbus
+            {{- include "modbus" . | indent 10 }}
+            register:
+              address: 48244 # Group 24 MaxSoC<<8 | MinSoC
+              type: writesingle
+              encoding: uint16
+        # FDSOC
+        - source: const
+          value: {{ .maxsoc }}
+          set:
+            source: modbus
+            {{- include "modbus" . | indent 10 }}
+            register:
+              address: 48245 # Group 24 FDSOC
+              type: writesingle
+              encoding: uint16
+        # FDPWR - force charge power in Watts
+        - source: const
+          value: {{ .maxchargepower }}
+          set:
+            source: modbus
+            {{- include "modbus" . | indent 10 }}
+            register:
+              address: 48246 # Group 24 FDPWR
+              type: writesingle
+              encoding: uint16
+        # Reserve
+        - source: const
+          value: 0
+          set:
+            source: modbus
+            {{- include "modbus" . | indent 10 }}
+            register:
+              address: 48247 # Group 24 Reserve
+              type: writesingle
+              encoding: uint16
+        # Reserve
+        - source: const
+          value: 0
+          set:
+            source: modbus
+            {{- include "modbus" . | indent 10 }}
+            register:
+              address: 48248 # Group 24 Reserve
+              type: writesingle
+              encoding: uint16
+        # Enable Flag (undocumented, required for force charge)
+        - source: const
+          value: 1
+          set:
+            source: modbus
+            {{- include "modbus" . | indent 10 }}
+            register:
+              address: 48249 # Group 24 Enable Flag
+              type: writesingle
+              encoding: uint16
+    default:
+      source: error
+      error: ErrNotAvailable
   {{- include "battery-params" . }}
   {{- end }}
